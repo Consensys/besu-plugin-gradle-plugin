@@ -1,0 +1,26 @@
+plugins {
+    id 'java-gradle-plugin'
+}
+
+gradlePlugin {
+    plugins {
+        besuPluginLibrary {
+            id = 'net.consensys.besu-plugin-library'
+            implementationClass = 'net.consensys.gradle.BesuPluginLibrary'
+        }
+        besuPluginDistribution {
+            id = 'net.consensys.besu-plugin-distribution'
+            implementationClass = 'net.consensys.gradle.BesuPluginDistribution'
+        }
+    }
+}
+group = 'net.consensys.gradle.besu-plugin'
+version = '0.1-SNAPSHOT'
+
+repositories {
+    mavenCentral()
+}
+
+test {
+    useJUnitPlatform()
+}
