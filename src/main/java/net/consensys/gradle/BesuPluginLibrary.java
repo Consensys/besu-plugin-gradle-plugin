@@ -46,7 +46,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
   static final String BESU_PROVIDED_DEPENDENCIES = BesuPluginLibrary.class.getName() + ".besuBomDependencies";
   static final String BESU_BOM_DEPENDENCY_COORDINATES = "org.hyperledger.besu:bom";
   static final String BESU_MAIN_DEPENDENCY_COORDINATES = "org.hyperledger.besu.internal:besu-besu";
-  static final String BESU_DEPENDENCY_CATALOG_RESOURCE_NAME = "/META-INF/besu-distribution-dependencies.json";
+  static final String BESU_ARTIFACTS_CATALOG_RESOURCE_NAME = "/META-INF/besu-artifacts-catalog.json";
   private final static Set<String> ANNOTATION_PROCESSOR_DEPENDENCIES = Set.of(
       "com.google.auto.service:auto-service"
   );
@@ -79,7 +79,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
     File besuMainJar = besuDependencyCatalogConfiguration.getSingleFile();
     String besuDependencyCatalog;
     try (FileSystem zipFs = FileSystems.newFileSystem(besuMainJar.toPath())) {
-      besuDependencyCatalog = Files.readString(zipFs.getPath(BESU_DEPENDENCY_CATALOG_RESOURCE_NAME));
+      besuDependencyCatalog = Files.readString(zipFs.getPath(BESU_ARTIFACTS_CATALOG_RESOURCE_NAME));
     } catch (IOException e) {
       throw new RuntimeException(e);
     }
