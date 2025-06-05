@@ -1,5 +1,5 @@
 org.hyperledger.besu.internal:besu-acceptance-tests-dsl                org.hyperledger.besu.internal:dsl
-org.hyperledger.besu.internal:besu-besu                org.hyperledger.besu.internal:besu
+org.hyperledger.besu.internal:besu-app                org.hyperledger.besu.internal:besu
 org.hyperledger.besu.internal:besu-config                org.hyperledger.besu.internal:config
 org.hyperledger.besu.internal:besu-consensus-clique                org.hyperledger.besu.internal:clique
 org.hyperledger.besu.internal:besu-consensus-common                org.hyperledger.besu.internal:common
