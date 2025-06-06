@@ -16,18 +16,20 @@
 
 package net.consensys.gradle;
 
-import net.consensys.gradle.BesuPluginLibrary.BesuProvidedDependency;
 import org.gradle.api.Plugin;
 import org.gradle.api.Project;
+import org.gradle.api.artifacts.ResolvedDependency;
 import org.gradle.api.distribution.DistributionContainer;
 import org.gradle.api.distribution.plugins.DistributionPlugin;
 import org.gradle.api.file.CopySpec;
 import org.gradle.api.plugins.internal.JavaPluginHelper;
 import org.gradle.api.plugins.jvm.internal.JvmFeatureInternal;
+import org.gradle.jvm.tasks.Jar;
 
 import java.io.File;
-import java.util.List;
 import java.util.Map;
+
+import static net.consensys.gradle.CollectPluginOnlyRuntimeArtifactsTask.PLUGIN_ARTIFACTS_CATALOG_RELATIVE_PATH;
 
 public abstract class BesuPluginDistribution implements Plugin<Project> {
 
@@ -36,14 +38,15 @@ public abstract class BesuPluginDistribution implements Plugin<Project> {
     project.getPluginManager().apply(BesuPluginLibrary.class);
     project.getPluginManager().apply(DistributionPlugin.class);
 
-    List<BesuProvidedDependency> besuProvidedDependencies = (List<BesuProvidedDependency>) project.getExtensions().getExtraProperties()
-        .get(BesuPluginLibrary.BESU_PROVIDED_DEPENDENCIES);
-
     // Register the task
-    project.getTasks().register("collectRuntimeArtifacts", CollectRuntimeArtifactsTask.class);
-    project.getTasks().named("installDist", task -> task.dependsOn("collectRuntimeArtifacts"));
-    project.getTasks().named("distTar", task -> task.dependsOn("collectRuntimeArtifacts"));
-    project.getTasks().named("distZip", task -> task.dependsOn("collectRuntimeArtifacts"));
+    project.getTasks().register(CollectPluginOnlyRuntimeArtifactsTask.TASK_NAME, CollectPluginOnlyRuntimeArtifactsTask.class,
+        task -> task.getRuntimeArtifacts().from(project.getConfigurations().getByName("runtimeClasspath")));
+    project.getTasks().withType(Jar.class)
+        .configureEach(jar -> {
+          jar.dependsOn(CollectPluginOnlyRuntimeArtifactsTask.TASK_NAME);
+          jar.from(project.getLayout().getBuildDirectory().file(PLUGIN_ARTIFACTS_CATALOG_RELATIVE_PATH), copySpec ->
+              copySpec.into("META-INF/"));
+        });
 
     JvmFeatureInternal mainFeature = JavaPluginHelper.getJavaComponent(project).getMainFeature();
 
@@ -52,32 +55,18 @@ public abstract class BesuPluginDistribution implements Plugin<Project> {
       CopySpec childSpec = project.copySpec();
       childSpec.from(mainFeature.getJarTask());
       childSpec.from(project.file("src/dist"));
-      childSpec.from(mainFeature.getRuntimeClasspathConfiguration());
-      childSpec.exclude(element -> providedByBesu(project, besuProvidedDependencies, element.getFile()));
+      childSpec.from(mainFeature.getRuntimeClasspathConfiguration(), copySpec ->
+        copySpec.exclude(element -> providedByBesu(project, element.getFile()))
+      );
 
       dist.getContents().with(childSpec);
     });
   }
 
-  private boolean providedByBesu(Project project, List<BesuProvidedDependency> besuProvidedDependencies, File file) {
-    Map<File, String> runtimeArtifacts = (Map<File, String>) project.getExtensions().getExtraProperties()
-        .get(CollectRuntimeArtifactsTask.BESU_PLUGIN_RUNTIME_ARTIFACTS);
-
-    String coordinate = runtimeArtifacts.get(file);
-    if (coordinate != null) {
-      String normalizedCoordinate = BesuOld2NewCoordinatesMapping.getOld2NewCoordinates().entrySet().stream()
-          .filter(e -> coordinate.startsWith(e.getKey())).map(Map.Entry::getValue).findFirst().orElse(coordinate);
-
-      var maybeBesuProvided = besuProvidedDependencies.stream().filter(providedDependency ->
-          normalizedCoordinate.startsWith(providedDependency.dependency().getGroup() + ":" + providedDependency.dependency().getName())).findAny();
-
-      if (maybeBesuProvided.isPresent()) {
-        project.getLogger()
-            .debug("Excluding runtime artifacts {} with coordinates {}({}) is already provided by Besu: '{}'",
-                file, coordinate, normalizedCoordinate, maybeBesuProvided.get());
-        return true;
-      }
-    }
-    return false;
+  private boolean providedByBesu(Project project, File file) {
+    Map<File, ResolvedDependency> pluginOnlyRuntimeArtifacts = (Map<File, ResolvedDependency>) project.getExtensions().getExtraProperties()
+        .get(CollectPluginOnlyRuntimeArtifactsTask.BESU_PLUGIN_ONLY_RUNTIME_ARTIFACTS);
+    project.getLogger().lifecycle("is provided by Besu {}", file);
+    return !pluginOnlyRuntimeArtifacts.containsKey(file);
   }
 }

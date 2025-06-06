@@ -151,7 +151,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                       + dependency.get("name") + ":"
                       + dependency.get("version") + "!!"
                       + (dependency.containsKey("classifier") ? ":" + dependency.get("classifier") : ""))
-              , dependency.get("fileName"))
+              , dependency.get("filename"))
       );
     }
     return besuProvidedDependencies;
