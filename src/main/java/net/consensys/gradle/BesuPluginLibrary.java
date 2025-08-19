@@ -22,6 +22,7 @@ import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.Dependency;
+import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.api.plugins.JavaLibraryPlugin;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -96,6 +97,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
     project.getExtensions().getExtraProperties().set(BESU_PROVIDED_DEPENDENCIES, List.copyOf(besuProvidedDependencies));
 
     addBesuDependencies(project, besuVersion, mergedDependencies);
+    excludeOldCoordinatesBesuDependencies(project);
   }
 
   private void configureRepositories(final Project project, final String besuRepo) {
@@ -190,12 +192,33 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
 
     for (Dependency dependency : mergedDependencies) {
       project.getDependencies().add("compileOnly", dependency);
-      project.getDependencies().add("testCompileOnly", dependency);
+      project.getDependencies().add("testImplementation", dependency);
 
       if (ANNOTATION_PROCESSOR_DEPENDENCIES.contains(dependency.getGroup() + ":" + dependency.getName())) {
         project.getDependencies().add("annotationProcessor", dependency);
       }
     }
+  }
+
+  private void excludeOldCoordinatesBesuDependencies(final Project project) {
+    project.getConfigurations().all(configuration -> {
+      configuration.resolutionStrategy(strategy -> {
+        strategy.getComponentSelection().all(selection -> {
+          ModuleComponentIdentifier requested = selection.getCandidate();
+          var groupId = requested.getGroup();
+          var moduleId = requested.getModule();
+
+          // Exclude Besu old coordinates
+          if (isOldCoordinate(groupId, moduleId)) {
+            selection.reject("Excluded Besu old coordinate: " + groupId + ":" + moduleId);
+          }
+        });
+      });
+    });
+  }
+
+  private boolean isOldCoordinate(String group, String module) {
+    return BesuOld2NewCoordinatesMapping.getOld2NewCoordinates().containsKey(group + ":" +  module);
   }
 
   private Element getElement(Node node, String name) {

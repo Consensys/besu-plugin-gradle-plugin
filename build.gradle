@@ -16,7 +16,7 @@ gradlePlugin {
     }
 }
 group = 'net.consensys.gradle.besu-plugin'
-version = '0.1-SNAPSHOT'
+version = '0.1.1-SNAPSHOT'
 
 repositories {
     mavenCentral()
@@ -25,7 +25,10 @@ repositories {
 
 publishing {
     repositories {
-        mavenLocal()
+        maven {
+            name = 'localPluginRepository'
+            url = file('../besu-plugin-gradle-plugin-artifacts')
+        }
     }
 }
 
