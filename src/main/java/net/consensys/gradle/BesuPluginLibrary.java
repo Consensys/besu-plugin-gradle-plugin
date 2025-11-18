@@ -23,6 +23,7 @@ import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
+import org.gradle.api.artifacts.component.ModuleComponentSelector;
 import org.gradle.api.plugins.JavaLibraryPlugin;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
@@ -98,6 +99,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
 
     addBesuDependencies(project, besuVersion, mergedDependencies);
     excludeOldCoordinatesBesuDependencies(project);
+    rewriteOldCoordinatesBesuDependencies(project, besuVersion);
   }
 
   private void configureRepositories(final Project project, final String besuRepo) {
@@ -211,6 +213,24 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
           // Exclude Besu old coordinates
           if (isOldCoordinate(groupId, moduleId)) {
             selection.reject("Excluded Besu old coordinate: " + groupId + ":" + moduleId);
+          }
+        });
+      });
+    });
+  }
+
+  private void rewriteOldCoordinatesBesuDependencies(final Project project, final String besuVersion) {
+    project.getConfigurations().all(configuration -> {
+      configuration.resolutionStrategy(strategy -> {
+        strategy.getDependencySubstitution().all(substitution -> {
+          var requested = substitution.getRequested();
+          if(requested instanceof ModuleComponentSelector mcs) {
+            var coord = mcs.getGroup() + ":" + mcs.getModule();
+            var newCoord = BesuOld2NewCoordinatesMapping.getOld2NewCoordinates().get(coord);
+
+            if(newCoord != null) {
+              substitution.useTarget(newCoord + ":" + besuVersion, "Migrated to new Besu coordinates");
+            }
           }
         });
       });
