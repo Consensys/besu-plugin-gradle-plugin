@@ -1,0 +1,3 @@
+plugins {
+    id 'net.consensys.besu-plugin-library' version '0.1.2'
+}

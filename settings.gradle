@@ -1,1 +1,14 @@
+pluginManagement {
+    repositories {
+        gradlePluginPortal()
+        maven {
+            url = uri('https://raw.githubusercontent.com/Consensys/besu-plugin-gradle-plugin-artifacts/main')
+        }
+    }
+}
+
 rootProject.name = 'besu-plugin-gradle-plugin'
+include 'examples:hello-ethereum'
+include 'examples:multi-module'
+include 'examples:multi-module:plugin'
+include 'examples:multi-module:lib'

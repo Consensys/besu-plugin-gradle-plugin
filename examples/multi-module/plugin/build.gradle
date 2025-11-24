@@ -1,0 +1,7 @@
+plugins {
+    id 'net.consensys.besu-plugin-distribution' version '0.1.2'
+}
+
+dependencies {
+    implementation project(':examples:multi-module:lib')
+}
