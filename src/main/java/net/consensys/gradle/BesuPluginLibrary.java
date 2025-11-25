@@ -1,20 +1,32 @@
 /*
- * Copyright 2010 the original author or authors.
+ * Copyright Consensys Software Inc.
  *
- * Licensed under the Apache License, Version 2.0 (the "License");
- * you may not use this file except in compliance with the License.
- * You may obtain a copy of the License at
+ * Licensed under the Apache License, Version 2.0 (the "License"); you may not use this file except in compliance with
+ * the License. You may obtain a copy of the License at
  *
- *      http://www.apache.org/licenses/LICENSE-2.0
+ * http://www.apache.org/licenses/LICENSE-2.0
  *
- * Unless required by applicable law or agreed to in writing, software
- * distributed under the License is distributed on an "AS IS" BASIS,
- * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
- * See the License for the specific language governing permissions and
- * limitations under the License.
+ * Unless required by applicable law or agreed to in writing, software distributed under the License is distributed on
+ * an "AS IS" BASIS, WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied. See the License for the
+ * specific language governing permissions and limitations under the License.
+ *
+ * SPDX-License-Identifier: Apache-2.0
  */
-
 package net.consensys.gradle;
+
+import java.io.File;
+import java.io.FileReader;
+import java.io.IOException;
+import java.net.URI;
+import java.nio.file.FileSystem;
+import java.nio.file.FileSystems;
+import java.nio.file.Files;
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+import javax.xml.parsers.ParserConfigurationException;
 
 import groovy.json.JsonSlurper;
 import groovy.xml.DOMBuilder;
@@ -30,42 +42,35 @@ import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
 import org.xml.sax.SAXException;
 
-import javax.xml.parsers.ParserConfigurationException;
-import java.io.File;
-import java.io.FileReader;
-import java.io.IOException;
-import java.net.URI;
-import java.nio.file.FileSystem;
-import java.nio.file.FileSystems;
-import java.nio.file.Files;
-import java.util.ArrayList;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
-import java.util.Set;
-
 public abstract class BesuPluginLibrary implements Plugin<Project> {
-  static final String BESU_PROVIDED_DEPENDENCIES = BesuPluginLibrary.class.getName() + ".besuBomDependencies";
+  static final String BESU_PROVIDED_DEPENDENCIES =
+      BesuPluginLibrary.class.getName() + ".besuBomDependencies";
   static final String BESU_BOM_DEPENDENCY_COORDINATES = "org.hyperledger.besu:bom";
   static final String BESU_MAIN_DEPENDENCY_COORDINATES = "org.hyperledger.besu.internal:besu-app";
-  static final String BESU_ARTIFACTS_CATALOG_RESOURCE_NAME = "/META-INF/besu-artifacts-catalog.json";
-  private final static Set<String> ANNOTATION_PROCESSOR_DEPENDENCIES = Set.of(
-      "com.google.auto.service:auto-service"
-  );
+  static final String BESU_ARTIFACTS_CATALOG_RESOURCE_NAME =
+      "/META-INF/besu-artifacts-catalog.json";
+  private static final Set<String> ANNOTATION_PROCESSOR_DEPENDENCIES =
+      Set.of("com.google.auto.service:auto-service");
 
   @Override
   public void apply(final Project project) {
     project.getPluginManager().apply(JavaLibraryPlugin.class);
 
     String besuVersion = project.property("besuVersion").toString();
-    String besuRepo = Optional.ofNullable(project.property("besuRepo"))
-        .map(Object::toString)
-        .orElse("https://hyperledger.jfrog.io/hyperledger/besu-maven/");
+    String besuRepo =
+        Optional.ofNullable(project.property("besuRepo"))
+            .map(Object::toString)
+            .orElse("https://hyperledger.jfrog.io/hyperledger/besu-maven/");
 
     configureRepositories(project, besuRepo);
 
-    Configuration bomConfiguration = project.getConfigurations()
-        .detachedConfiguration(project.getDependencies().create(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion + "@pom"));
+    Configuration bomConfiguration =
+        project
+            .getConfigurations()
+            .detachedConfiguration(
+                project
+                    .getDependencies()
+                    .create(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion + "@pom"));
     bomConfiguration.setCanBeResolved(true);
     File besuBom = bomConfiguration.getSingleFile();
     List<Dependency> bomDependencies;
@@ -75,8 +80,13 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
       throw new RuntimeException(e);
     }
 
-    Configuration besuDependencyCatalogConfiguration = project.getConfigurations()
-        .detachedConfiguration(project.getDependencies().create(BESU_MAIN_DEPENDENCY_COORDINATES + ":" + besuVersion + "@jar"));
+    Configuration besuDependencyCatalogConfiguration =
+        project
+            .getConfigurations()
+            .detachedConfiguration(
+                project
+                    .getDependencies()
+                    .create(BESU_MAIN_DEPENDENCY_COORDINATES + ":" + besuVersion + "@jar"));
     besuDependencyCatalogConfiguration.setCanBeResolved(true);
     File besuMainJar = besuDependencyCatalogConfiguration.getSingleFile();
     String besuDependencyCatalog;
@@ -93,9 +103,13 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
       throw new RuntimeException(e);
     }
 
-    List<Dependency> mergedDependencies = mergeDependencies(bomDependencies, besuProvidedDependencies);
+    List<Dependency> mergedDependencies =
+        mergeDependencies(bomDependencies, besuProvidedDependencies);
 
-    project.getExtensions().getExtraProperties().set(BESU_PROVIDED_DEPENDENCIES, List.copyOf(besuProvidedDependencies));
+    project
+        .getExtensions()
+        .getExtraProperties()
+        .set(BESU_PROVIDED_DEPENDENCIES, List.copyOf(besuProvidedDependencies));
 
     addBesuDependencies(project, besuVersion, mergedDependencies);
     excludeOldCoordinatesBesuDependencies(project);
@@ -103,38 +117,64 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
   }
 
   private void configureRepositories(final Project project, final String besuRepo) {
-    project.getRepositories().maven(mavenArtifactRepository -> {
-      mavenArtifactRepository.setUrl(URI.create(besuRepo));
-      mavenArtifactRepository.mavenContent(mavenRepositoryContentDescriptor ->
-          mavenRepositoryContentDescriptor.includeGroupAndSubgroups("org.hyperledger.besu"));
-    });
-    project.getRepositories().maven(mavenArtifactRepository -> {
-      mavenArtifactRepository.setUrl(URI.create("https://hyperledger.jfrog.io/hyperledger/besu-maven/"));
-      mavenArtifactRepository.mavenContent(mavenRepositoryContentDescriptor ->
-          mavenRepositoryContentDescriptor.includeGroupAndSubgroups("org.hyperledger.besu"));
-    });
-    project.getRepositories().maven(mavenArtifactRepository -> {
-      mavenArtifactRepository.setUrl(URI.create("https://artifacts.consensys.net/public/maven/maven/"));
-      mavenArtifactRepository.mavenContent(mavenRepositoryContentDescriptor ->
-          mavenRepositoryContentDescriptor.includeGroupAndSubgroups("tech.pegasys"));
-    });
-    project.getRepositories().maven(mavenArtifactRepository -> {
-      mavenArtifactRepository.setUrl(URI.create("https://splunk.jfrog.io/splunk/ext-releases-local/"));
-      mavenArtifactRepository.mavenContent(mavenRepositoryContentDescriptor ->
-          mavenRepositoryContentDescriptor.includeGroupAndSubgroups("com.splunk"));
-    });
+    project
+        .getRepositories()
+        .maven(
+            mavenArtifactRepository -> {
+              mavenArtifactRepository.setUrl(URI.create(besuRepo));
+              mavenArtifactRepository.mavenContent(
+                  mavenRepositoryContentDescriptor ->
+                      mavenRepositoryContentDescriptor.includeGroupAndSubgroups(
+                          "org.hyperledger.besu"));
+            });
+    project
+        .getRepositories()
+        .maven(
+            mavenArtifactRepository -> {
+              mavenArtifactRepository.setUrl(
+                  URI.create("https://hyperledger.jfrog.io/hyperledger/besu-maven/"));
+              mavenArtifactRepository.mavenContent(
+                  mavenRepositoryContentDescriptor ->
+                      mavenRepositoryContentDescriptor.includeGroupAndSubgroups(
+                          "org.hyperledger.besu"));
+            });
+    project
+        .getRepositories()
+        .maven(
+            mavenArtifactRepository -> {
+              mavenArtifactRepository.setUrl(
+                  URI.create("https://artifacts.consensys.net/public/maven/maven/"));
+              mavenArtifactRepository.mavenContent(
+                  mavenRepositoryContentDescriptor ->
+                      mavenRepositoryContentDescriptor.includeGroupAndSubgroups("tech.pegasys"));
+            });
+    project
+        .getRepositories()
+        .maven(
+            mavenArtifactRepository -> {
+              mavenArtifactRepository.setUrl(
+                  URI.create("https://splunk.jfrog.io/splunk/ext-releases-local/"));
+              mavenArtifactRepository.mavenContent(
+                  mavenRepositoryContentDescriptor ->
+                      mavenRepositoryContentDescriptor.includeGroupAndSubgroups("com.splunk"));
+            });
 
     project.getRepositories().mavenCentral();
     project.getRepositories().mavenLocal();
   }
 
-  private List<Dependency> mergeDependencies(final List<Dependency> bomDependencies, final List<BesuProvidedDependency> besuProvidedDependencies) {
+  private List<Dependency> mergeDependencies(
+      final List<Dependency> bomDependencies,
+      final List<BesuProvidedDependency> besuProvidedDependencies) {
     List<Dependency> mergedDependencies = new ArrayList<>(bomDependencies);
     for (BesuProvidedDependency providedDependency : besuProvidedDependencies) {
-      if (bomDependencies.stream().noneMatch(bomDependency ->
-          bomDependency.getGroup().equals(providedDependency.dependency().getGroup()) &&
-              bomDependency.getName().equals(providedDependency.dependency().getName())
-      )) {
+      if (bomDependencies.stream()
+          .noneMatch(
+              bomDependency ->
+                  bomDependency.getGroup().equals(providedDependency.dependency().getGroup())
+                      && bomDependency
+                          .getName()
+                          .equals(providedDependency.dependency().getName()))) {
         mergedDependencies.add(providedDependency.dependency());
       }
     }
@@ -142,7 +182,9 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
     return mergedDependencies;
   }
 
-  private List<BesuProvidedDependency> parseBesuDependencyCatalog(final Project project, final String besuDependencyCatalog) throws ParserConfigurationException, IOException, SAXException {
+  private List<BesuProvidedDependency> parseBesuDependencyCatalog(
+      final Project project, final String besuDependencyCatalog)
+      throws ParserConfigurationException, IOException, SAXException {
     List<BesuProvidedDependency> besuProvidedDependencies = new ArrayList<>();
 
     ArrayList json = (ArrayList) new JsonSlurper().parseText(besuDependencyCatalog);
@@ -150,95 +192,179 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
       Map<String, String> dependency = (Map<String, String>) o;
       besuProvidedDependencies.add(
           new BesuProvidedDependency(
-              project.getDependencies().create(
-                  dependency.get("group") + ":"
-                      + dependency.get("name") + ":"
-                      + dependency.get("version") + "!!"
-                      + (dependency.containsKey("classifier") ? ":" + dependency.get("classifier") : ""))
-              , dependency.get("filename"))
-      );
+              project
+                  .getDependencies()
+                  .create(
+                      dependency.get("group")
+                          + ":"
+                          + dependency.get("name")
+                          + ":"
+                          + dependency.get("version")
+                          + "!!"
+                          + (dependency.containsKey("classifier")
+                              ? ":" + dependency.get("classifier")
+                              : "")),
+              dependency.get("filename")));
     }
     return besuProvidedDependencies;
   }
 
-  private List<Dependency> parseBesuBOM(final Project project, final File besuBom) throws ParserConfigurationException, IOException, SAXException {
+  private List<Dependency> parseBesuBOM(final Project project, final File besuBom)
+      throws ParserConfigurationException, IOException, SAXException {
     List<Dependency> bomDependencies = new ArrayList<>();
-    Node dependencyManagementNode = DOMBuilder.parse(new FileReader(besuBom)).getDocumentElement().getElementsByTagName("dependencyManagement").item(0);
+    Node dependencyManagementNode =
+        DOMBuilder.parse(new FileReader(besuBom))
+            .getDocumentElement()
+            .getElementsByTagName("dependencyManagement")
+            .item(0);
 
     Element dependenciesElement = getElement(dependencyManagementNode, "dependencies");
 
-    List<Element> dependencyElements = getElements(dependenciesElement.getElementsByTagName("dependency"), "dependency");
+    List<Element> dependencyElements =
+        getElements(dependenciesElement.getElementsByTagName("dependency"), "dependency");
 
     for (Element depElement : dependencyElements) {
       var typeElement = depElement.getElementsByTagName("type");
-      boolean isBom = typeElement.getLength() > 0 && depElement.getElementsByTagName("type").item(0).getTextContent().equals("pom");
+      boolean isBom =
+          typeElement.getLength() > 0
+              && depElement.getElementsByTagName("type").item(0).getTextContent().equals("pom");
       if (!isBom) {
         var groupId = depElement.getElementsByTagName("groupId").item(0).getTextContent();
         var artifactId = depElement.getElementsByTagName("artifactId").item(0).getTextContent();
         var version = depElement.getElementsByTagName("version").item(0).getTextContent();
         var classifierElement = depElement.getElementsByTagName("classifier");
 
-        bomDependencies.add(project.getDependencies().create(groupId + ":" + artifactId + ":" + version + "!!" + (classifierElement.getLength() > 0 ? ":" + classifierElement.item(0).getTextContent() : "")));
+        bomDependencies.add(
+            project
+                .getDependencies()
+                .create(
+                    groupId
+                        + ":"
+                        + artifactId
+                        + ":"
+                        + version
+                        + "!!"
+                        + (classifierElement.getLength() > 0
+                            ? ":" + classifierElement.item(0).getTextContent()
+                            : "")));
       }
     }
     return bomDependencies;
   }
 
-  private void addBesuDependencies(final Project project, final String besuVersion, final List<Dependency> mergedDependencies) {
-    project.getDependencies().add("annotationProcessor", project.getDependencies().enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
-    project.getDependencies().add("implementation", project.getDependencies().enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
-    project.getDependencies().add("testImplementation", project.getDependencies().enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
-    project.getDependencies().add("compileOnly", project.getDependencies().enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
-    project.getDependencies().add("testCompileOnly", project.getDependencies().enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
-    project.getDependencies().add("runtimeOnly", project.getDependencies().enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
+  private void addBesuDependencies(
+      final Project project, final String besuVersion, final List<Dependency> mergedDependencies) {
+    project
+        .getDependencies()
+        .add(
+            "annotationProcessor",
+            project
+                .getDependencies()
+                .enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
+    project
+        .getDependencies()
+        .add(
+            "implementation",
+            project
+                .getDependencies()
+                .enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
+    project
+        .getDependencies()
+        .add(
+            "testImplementation",
+            project
+                .getDependencies()
+                .enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
+    project
+        .getDependencies()
+        .add(
+            "compileOnly",
+            project
+                .getDependencies()
+                .enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
+    project
+        .getDependencies()
+        .add(
+            "testCompileOnly",
+            project
+                .getDependencies()
+                .enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
+    project
+        .getDependencies()
+        .add(
+            "runtimeOnly",
+            project
+                .getDependencies()
+                .enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
 
     for (Dependency dependency : mergedDependencies) {
       project.getDependencies().add("compileOnly", dependency);
       project.getDependencies().add("testImplementation", dependency);
 
-      if (ANNOTATION_PROCESSOR_DEPENDENCIES.contains(dependency.getGroup() + ":" + dependency.getName())) {
+      if (ANNOTATION_PROCESSOR_DEPENDENCIES.contains(
+          dependency.getGroup() + ":" + dependency.getName())) {
         project.getDependencies().add("annotationProcessor", dependency);
       }
     }
   }
 
   private void excludeOldCoordinatesBesuDependencies(final Project project) {
-    project.getConfigurations().all(configuration -> {
-      configuration.resolutionStrategy(strategy -> {
-        strategy.getComponentSelection().all(selection -> {
-          ModuleComponentIdentifier requested = selection.getCandidate();
-          var groupId = requested.getGroup();
-          var moduleId = requested.getModule();
+    project
+        .getConfigurations()
+        .all(
+            configuration -> {
+              configuration.resolutionStrategy(
+                  strategy -> {
+                    strategy
+                        .getComponentSelection()
+                        .all(
+                            selection -> {
+                              ModuleComponentIdentifier requested = selection.getCandidate();
+                              var groupId = requested.getGroup();
+                              var moduleId = requested.getModule();
 
-          // Exclude Besu old coordinates
-          if (isOldCoordinate(groupId, moduleId)) {
-            selection.reject("Excluded Besu old coordinate: " + groupId + ":" + moduleId);
-          }
-        });
-      });
-    });
+                              // Exclude Besu old coordinates
+                              if (isOldCoordinate(groupId, moduleId)) {
+                                selection.reject(
+                                    "Excluded Besu old coordinate: " + groupId + ":" + moduleId);
+                              }
+                            });
+                  });
+            });
   }
 
-  private void rewriteOldCoordinatesBesuDependencies(final Project project, final String besuVersion) {
-    project.getConfigurations().all(configuration -> {
-      configuration.resolutionStrategy(strategy -> {
-        strategy.getDependencySubstitution().all(substitution -> {
-          var requested = substitution.getRequested();
-          if(requested instanceof ModuleComponentSelector mcs) {
-            var coord = mcs.getGroup() + ":" + mcs.getModule();
-            var newCoord = BesuOld2NewCoordinatesMapping.getOld2NewCoordinates().get(coord);
+  private void rewriteOldCoordinatesBesuDependencies(
+      final Project project, final String besuVersion) {
+    project
+        .getConfigurations()
+        .all(
+            configuration -> {
+              configuration.resolutionStrategy(
+                  strategy -> {
+                    strategy
+                        .getDependencySubstitution()
+                        .all(
+                            substitution -> {
+                              var requested = substitution.getRequested();
+                              if (requested instanceof ModuleComponentSelector mcs) {
+                                var coord = mcs.getGroup() + ":" + mcs.getModule();
+                                var newCoord =
+                                    BesuOld2NewCoordinatesMapping.getOld2NewCoordinates()
+                                        .get(coord);
 
-            if(newCoord != null) {
-              substitution.useTarget(newCoord + ":" + besuVersion, "Migrated to new Besu coordinates");
-            }
-          }
-        });
-      });
-    });
+                                if (newCoord != null) {
+                                  substitution.useTarget(
+                                      newCoord + ":" + besuVersion,
+                                      "Migrated to new Besu coordinates");
+                                }
+                              }
+                            });
+                  });
+            });
   }
 
   private boolean isOldCoordinate(String group, String module) {
-    return BesuOld2NewCoordinatesMapping.getOld2NewCoordinates().containsKey(group + ":" +  module);
+    return BesuOld2NewCoordinatesMapping.getOld2NewCoordinates().containsKey(group + ":" + module);
   }
 
   private Element getElement(Node node, String name) {
@@ -247,7 +373,8 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
         return (Element) node.getChildNodes().item(i);
       }
     }
-    throw new RuntimeException("Element %s not found in node %s".formatted(name, node.getNodeName()));
+    throw new RuntimeException(
+        "Element %s not found in node %s".formatted(name, node.getNodeName()));
   }
 
   private List<Element> getElements(NodeList nodeList, String name) {
@@ -260,6 +387,5 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
     return elements;
   }
 
-  record BesuProvidedDependency(Dependency dependency, String filename) {
-  }
+  record BesuProvidedDependency(Dependency dependency, String filename) {}
 }
