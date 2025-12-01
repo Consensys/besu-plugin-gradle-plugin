@@ -78,7 +78,7 @@ Then in the `build.gradle` of define that you want to use the plugin
 
 ```groovy
 plugins {
-    id 'net.consensys.besu-plugin-distribution' version '0.1.3'
+    id 'net.consensys.besu-plugin-distribution' version '0.1.4'
 }
 ```
 
@@ -95,7 +95,7 @@ Then since the libraries are not meant to be distributed as plugins, you need to
 
 ```groovy
 plugins {
-    id 'net.consensys.besu-plugin-library' version '0.1.3'
+    id 'net.consensys.besu-plugin-library' version '0.1.4'
 }
 ```
 
