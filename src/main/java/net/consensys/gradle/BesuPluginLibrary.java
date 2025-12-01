@@ -24,7 +24,6 @@ import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
-import java.util.Optional;
 import java.util.Set;
 import javax.xml.parsers.ParserConfigurationException;
 
@@ -58,9 +57,9 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
 
     String besuVersion = project.property("besuVersion").toString();
     String besuRepo =
-        Optional.ofNullable(project.property("besuRepo"))
-            .map(Object::toString)
-            .orElse("https://hyperledger.jfrog.io/hyperledger/besu-maven/");
+        project.hasProperty("besuRepo")
+            ? project.property("besuRepo").toString()
+            : "https://hyperledger.jfrog.io/hyperledger/besu-maven/";
 
     configureRepositories(project, besuRepo);
 
