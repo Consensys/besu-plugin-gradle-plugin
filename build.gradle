@@ -43,7 +43,7 @@ gradlePlugin {
 }
 
 group = 'net.consensys.gradle.besu-plugin'
-version = '0.1.3-SNAPSHOT'
+version = '0.1.4-SNAPSHOT'
 
 publishing {
   repositories {
@@ -91,7 +91,7 @@ configure(allprojects) {
       target '*.gradle'
       greclipse('4.31').configFile(rootProject.file('gradle/spotless/greclipse.properties'))
       endWithNewline()
-      licenseHeaderFile("${rootDir}/gradle/spotless/java.current.license", "(import|plugin)").named("current")
+      licenseHeaderFile("${rootDir}/gradle/spotless/java.current.license", "(import|plugin|rootProject)").named("current")
     }
   }
 }

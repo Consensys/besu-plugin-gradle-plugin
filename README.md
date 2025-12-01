@@ -69,20 +69,6 @@ What is still missing are the checks to notify the devs about possible errors th
 
 ## Usage
 
-Temporary maven repository before the publishing to Gradle Plugin portal: <https://github.com/Consensys/besu-plugin-gradle-plugin-artifacts>
-
-In `settings.gradle` define the temporary plugin repository:
-```groovy
-pluginManagement {
-    repositories {
-        gradlePluginPortal()
-        maven {
-            url = uri('https://raw.githubusercontent.com/Consensys/besu-plugin-gradle-plugin-artifacts/main')
-        }
-    }
-}
-```
-
 Set the version of Besu to use in `gradle.properties`:
 ```groovy
 besuVersion=25.11.0
@@ -92,7 +78,7 @@ Then in the `build.gradle` of define that you want to use the plugin
 
 ```groovy
 plugins {
-    id 'net.consensys.besu-plugin-distribution' version '0.1.2'
+    id 'net.consensys.besu-plugin-distribution' version '0.1.3'
 }
 ```
 
@@ -109,7 +95,7 @@ Then since the libraries are not meant to be distributed as plugins, you need to
 
 ```groovy
 plugins {
-    id 'net.consensys.besu-plugin-library' version '0.1.2'
+    id 'net.consensys.besu-plugin-library' version '0.1.3'
 }
 ```
 
