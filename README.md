@@ -69,9 +69,11 @@ What is still missing are the checks to notify the devs about possible errors th
 
 ## Usage
 
-Set the version of Besu to use in `gradle.properties`:
+Set the version of Besu to use in `build.gradle` using the `besuPlugin` extension:
 ```groovy
-besuVersion=25.11.0
+besuPlugin {
+    besuVersion = '25.12.0'
+}
 ```
 
 Then in the `build.gradle` of define that you want to use the plugin

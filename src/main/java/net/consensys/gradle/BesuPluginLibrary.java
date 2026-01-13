@@ -55,64 +55,90 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
   public void apply(final Project project) {
     project.getPluginManager().apply(JavaLibraryPlugin.class);
 
-    String besuVersion = project.property("besuVersion").toString();
-    String besuRepo =
-        project.hasProperty("besuRepo")
-            ? project.property("besuRepo").toString()
-            : "https://hyperledger.jfrog.io/hyperledger/besu-maven/";
+    // Create the extension
+    BesuPluginLibraryExtension extension =
+        project.getExtensions().create("besuPlugin", BesuPluginLibraryExtension.class);
 
-    configureRepositories(project, besuRepo);
+    // Set default value for besuRepo
+    extension.getBesuRepo().convention("https://hyperledger.jfrog.io/hyperledger/besu-maven/");
 
-    Configuration bomConfiguration =
-        project
-            .getConfigurations()
-            .detachedConfiguration(
-                project
-                    .getDependencies()
-                    .create(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion + "@pom"));
-    bomConfiguration.setCanBeResolved(true);
-    File besuBom = bomConfiguration.getSingleFile();
-    List<Dependency> bomDependencies;
-    try {
-      bomDependencies = parseBesuBOM(project, besuBom);
-    } catch (ParserConfigurationException | IOException | SAXException e) {
-      throw new RuntimeException(e);
-    }
+    // Configure after project evaluation to allow extension configuration
+    project.afterEvaluate(
+        p -> {
+          // Get besuVersion from extension, fallback to project property if not set
+          String besuVersion;
+          if (extension.getBesuVersion().isPresent()) {
+            besuVersion = extension.getBesuVersion().get();
+            // Set as project property so other code can access it
+            project.getExtensions().getExtraProperties().set("besuVersion", besuVersion);
+          } else if (project.hasProperty("besuVersion")) {
+            besuVersion = project.property("besuVersion").toString();
+          } else {
+            throw new IllegalStateException(
+                "besuVersion must be set either in besuPlugin extension or as a project property");
+          }
 
-    Configuration besuDependencyCatalogConfiguration =
-        project
-            .getConfigurations()
-            .detachedConfiguration(
-                project
-                    .getDependencies()
-                    .create(BESU_MAIN_DEPENDENCY_COORDINATES + ":" + besuVersion + "@jar"));
-    besuDependencyCatalogConfiguration.setCanBeResolved(true);
-    File besuMainJar = besuDependencyCatalogConfiguration.getSingleFile();
-    String besuDependencyCatalog;
-    try (FileSystem zipFs = FileSystems.newFileSystem(besuMainJar.toPath())) {
-      besuDependencyCatalog = Files.readString(zipFs.getPath(BESU_ARTIFACTS_CATALOG_RESOURCE_NAME));
-    } catch (IOException e) {
-      throw new RuntimeException(e);
-    }
+          // Get besuRepo from extension (already has default value)
+          String besuRepo = extension.getBesuRepo().get();
+          // Set as project property for consistency
+          if (!project.hasProperty("besuRepo")) {
+            project.getExtensions().getExtraProperties().set("besuRepo", besuRepo);
+          }
 
-    List<BesuProvidedDependency> besuProvidedDependencies;
-    try {
-      besuProvidedDependencies = parseBesuDependencyCatalog(project, besuDependencyCatalog);
-    } catch (ParserConfigurationException | IOException | SAXException e) {
-      throw new RuntimeException(e);
-    }
+          configureRepositories(project, besuRepo);
 
-    List<Dependency> mergedDependencies =
-        mergeDependencies(bomDependencies, besuProvidedDependencies);
+          Configuration bomConfiguration =
+              project
+                  .getConfigurations()
+                  .detachedConfiguration(
+                      project
+                          .getDependencies()
+                          .create(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion + "@pom"));
+          bomConfiguration.setCanBeResolved(true);
+          File besuBom = bomConfiguration.getSingleFile();
+          List<Dependency> bomDependencies;
+          try {
+            bomDependencies = parseBesuBOM(project, besuBom);
+          } catch (ParserConfigurationException | IOException | SAXException e) {
+            throw new RuntimeException(e);
+          }
 
-    project
-        .getExtensions()
-        .getExtraProperties()
-        .set(BESU_PROVIDED_DEPENDENCIES, List.copyOf(besuProvidedDependencies));
+          Configuration besuDependencyCatalogConfiguration =
+              project
+                  .getConfigurations()
+                  .detachedConfiguration(
+                      project
+                          .getDependencies()
+                          .create(BESU_MAIN_DEPENDENCY_COORDINATES + ":" + besuVersion + "@jar"));
+          besuDependencyCatalogConfiguration.setCanBeResolved(true);
+          File besuMainJar = besuDependencyCatalogConfiguration.getSingleFile();
+          String besuDependencyCatalog;
+          try (FileSystem zipFs = FileSystems.newFileSystem(besuMainJar.toPath())) {
+            besuDependencyCatalog =
+                Files.readString(zipFs.getPath(BESU_ARTIFACTS_CATALOG_RESOURCE_NAME));
+          } catch (IOException e) {
+            throw new RuntimeException(e);
+          }
 
-    addBesuDependencies(project, besuVersion, mergedDependencies);
-    excludeOldCoordinatesBesuDependencies(project);
-    rewriteOldCoordinatesBesuDependencies(project, besuVersion);
+          List<BesuProvidedDependency> besuProvidedDependencies;
+          try {
+            besuProvidedDependencies = parseBesuDependencyCatalog(project, besuDependencyCatalog);
+          } catch (ParserConfigurationException | IOException | SAXException e) {
+            throw new RuntimeException(e);
+          }
+
+          List<Dependency> mergedDependencies =
+              mergeDependencies(bomDependencies, besuProvidedDependencies);
+
+          project
+              .getExtensions()
+              .getExtraProperties()
+              .set(BESU_PROVIDED_DEPENDENCIES, List.copyOf(besuProvidedDependencies));
+
+          addBesuDependencies(project, besuVersion, mergedDependencies);
+          excludeOldCoordinatesBesuDependencies(project);
+          rewriteOldCoordinatesBesuDependencies(project, besuVersion);
+        });
   }
 
   private void configureRepositories(final Project project, final String besuRepo) {
