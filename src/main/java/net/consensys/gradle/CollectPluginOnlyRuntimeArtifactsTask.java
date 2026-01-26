@@ -128,7 +128,7 @@ public abstract class CollectPluginOnlyRuntimeArtifactsTask extends DefaultTask 
         besuProvidedDependencies.stream()
             .filter(
                 providedDependency ->
-                    coordinate.startsWith(
+                    coordinate.equals(
                         providedDependency.dependency().getGroup()
                             + ":"
                             + providedDependency.dependency().getName()))
