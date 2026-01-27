@@ -57,6 +57,32 @@ public abstract class BesuPluginDistribution implements Plugin<Project> {
                       .getBuildDirectory()
                       .file(PLUGIN_ARTIFACTS_CATALOG_RELATIVE_PATH),
                   copySpec -> copySpec.into("META-INF/"));
+
+              // Include plugin-only runtime dependencies in the JAR (fat JAR)
+              // Use a lazy provider that only evaluates after collectPluginOnlyRuntimeArtifacts
+              // completes
+              jar.from(
+                  project
+                      .getTasks()
+                      .named(CollectPluginOnlyRuntimeArtifactsTask.TASK_NAME)
+                      .map(
+                          task -> {
+                            Map<File, ResolvedDependency> pluginOnlyRuntimeArtifacts =
+                                (Map<File, ResolvedDependency>)
+                                    project
+                                        .getExtensions()
+                                        .getExtraProperties()
+                                        .get(
+                                            CollectPluginOnlyRuntimeArtifactsTask
+                                                .BESU_PLUGIN_ONLY_RUNTIME_ARTIFACTS);
+                            return pluginOnlyRuntimeArtifacts.keySet().stream()
+                                .map(file -> project.zipTree(file))
+                                .toList();
+                          }));
+
+              // Exclude signature files and duplicates
+              jar.exclude("META-INF/*.SF", "META-INF/*.DSA", "META-INF/*.RSA");
+              jar.setDuplicatesStrategy(org.gradle.api.file.DuplicatesStrategy.EXCLUDE);
             });
 
     JvmFeatureInternal mainFeature = JavaPluginHelper.getJavaComponent(project).getMainFeature();
