@@ -25,6 +25,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.atomic.AtomicBoolean;
 import javax.xml.parsers.ParserConfigurationException;
 
 import groovy.json.JsonSlurper;
@@ -33,9 +34,12 @@ import org.gradle.api.Plugin;
 import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.Dependency;
+import org.gradle.api.artifacts.DependencySet;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.api.artifacts.component.ModuleComponentSelector;
 import org.gradle.api.plugins.JavaLibraryPlugin;
+import org.gradle.api.provider.Provider;
+import org.gradle.api.tasks.compile.AbstractCompile;
 import org.w3c.dom.Element;
 import org.w3c.dom.Node;
 import org.w3c.dom.NodeList;
@@ -44,6 +48,7 @@ import org.xml.sax.SAXException;
 public abstract class BesuPluginLibrary implements Plugin<Project> {
   static final String BESU_PROVIDED_DEPENDENCIES =
       BesuPluginLibrary.class.getName() + ".besuBomDependencies";
+  static final String RESOLVE_BESU_DEPS_TASK_NAME = "resolveBesuProvidedDependencies";
   static final String BESU_BOM_DEPENDENCY_COORDINATES = "org.hyperledger.besu:bom";
   static final String BESU_MAIN_DEPENDENCY_COORDINATES = "org.hyperledger.besu.internal:besu-app";
   static final String BESU_ARTIFACTS_CATALOG_RESOURCE_NAME =
@@ -61,84 +66,167 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
 
     // Set default value for besuRepo
     extension.getBesuRepo().convention("https://hyperledger.jfrog.io/hyperledger/besu-maven/");
+    Provider<String> besuVersionProvider =
+        extension.getBesuVersion().orElse(project.getProviders().gradleProperty("besuVersion"));
 
-    // Configure after project evaluation to allow extension configuration
+    // Register eagerly so consumers can depend on this task during configuration.
+    project.getTasks().register(RESOLVE_BESU_DEPS_TASK_NAME);
+
+    // Configure after project evaluation to allow extension configuration.
+    // Only repositories, enforcedPlatform, and resolution strategies are set here —
+    // none of these trigger dependency resolution. The expensive BOM/catalog parsing
+    // is deferred to withDependencies callbacks (execution phase).
     project.afterEvaluate(
         p -> {
-          // Get besuVersion from extension, fallback to project property if not set
-          String besuVersion;
-          if (extension.getBesuVersion().isPresent()) {
-            besuVersion = extension.getBesuVersion().get();
-            // Set as project property so other code can access it
-            project.getExtensions().getExtraProperties().set("besuVersion", besuVersion);
-          } else if (project.hasProperty("besuVersion")) {
-            besuVersion = project.property("besuVersion").toString();
-          } else {
-            throw new IllegalStateException(
-                "besuVersion must be set either in besuPlugin extension or as a project property");
-          }
-
-          // Get besuRepo from extension (already has default value)
           String besuRepo = extension.getBesuRepo().get();
-          // Set as project property for consistency
           if (!project.hasProperty("besuRepo")) {
             project.getExtensions().getExtraProperties().set("besuRepo", besuRepo);
           }
 
           configureRepositories(project, besuRepo);
+          addEnforcedPlatforms(project, besuVersionProvider);
+          excludeOldCoordinatesBesuDependencies(project);
+          rewriteOldCoordinatesBesuDependencies(project, besuVersionProvider);
 
-          Configuration bomConfiguration =
-              project
-                  .getConfigurations()
-                  .detachedConfiguration(
-                      project
-                          .getDependencies()
-                          .create(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion + "@pom"));
-          bomConfiguration.setCanBeResolved(true);
-          File besuBom = bomConfiguration.getSingleFile();
-          List<Dependency> bomDependencies;
-          try {
-            bomDependencies = parseBesuBOM(project, besuBom);
-          } catch (ParserConfigurationException | IOException | SAXException e) {
-            throw new RuntimeException(e);
-          }
-
-          Configuration besuDependencyCatalogConfiguration =
-              project
-                  .getConfigurations()
-                  .detachedConfiguration(
-                      project
-                          .getDependencies()
-                          .create(BESU_MAIN_DEPENDENCY_COORDINATES + ":" + besuVersion + "@jar"));
-          besuDependencyCatalogConfiguration.setCanBeResolved(true);
-          File besuMainJar = besuDependencyCatalogConfiguration.getSingleFile();
-          String besuDependencyCatalog;
-          try (FileSystem zipFs = FileSystems.newFileSystem(besuMainJar.toPath())) {
-            besuDependencyCatalog =
-                Files.readString(zipFs.getPath(BESU_ARTIFACTS_CATALOG_RESOURCE_NAME));
-          } catch (IOException e) {
-            throw new RuntimeException(e);
-          }
-
-          List<BesuProvidedDependency> besuProvidedDependencies;
-          try {
-            besuProvidedDependencies = parseBesuDependencyCatalog(project, besuDependencyCatalog);
-          } catch (ParserConfigurationException | IOException | SAXException e) {
-            throw new RuntimeException(e);
-          }
-
-          List<Dependency> mergedDependencies =
-              mergeDependencies(bomDependencies, besuProvidedDependencies);
+          // Lazy dependency injection: parse BOM + catalog only when a configuration
+          // actually resolves (execution phase), not during afterEvaluate.
+          AtomicBoolean resolved = new AtomicBoolean(false);
+          List<Dependency> mergedDeps = new ArrayList<>();
+          Runnable ensureResolved =
+              () -> {
+                if (resolved.compareAndSet(false, true)) {
+                  String besuVersion = requireBesuVersion(besuVersionProvider);
+                  List<Dependency> bomDeps = resolveBomDependencies(project, besuVersion);
+                  List<BesuProvidedDependency> catalogDeps =
+                      resolveCatalogDependencies(project, besuVersion);
+                  mergedDeps.addAll(mergeDependencies(bomDeps, catalogDeps));
+                  project
+                      .getExtensions()
+                      .getExtraProperties()
+                      .set(BESU_PROVIDED_DEPENDENCIES, List.copyOf(catalogDeps));
+                  project.getExtensions().getExtraProperties().set("besuVersion", besuVersion);
+                }
+              };
 
           project
-              .getExtensions()
-              .getExtraProperties()
-              .set(BESU_PROVIDED_DEPENDENCIES, List.copyOf(besuProvidedDependencies));
+              .getTasks()
+              .named(RESOLVE_BESU_DEPS_TASK_NAME)
+              .configure(
+                  task -> {
+                    task.setGroup("Build");
+                    task.setDescription(
+                        "Resolves Besu BOM and catalog dependencies for Besu plugin builds.");
+                    task.getInputs().property("besuVersion", besuVersionProvider);
+                    task.doLast(t -> ensureResolved.run());
+                  });
 
-          addBesuDependencies(project, besuVersion, mergedDependencies);
-          excludeOldCoordinatesBesuDependencies(project);
-          rewriteOldCoordinatesBesuDependencies(project, besuVersion);
+          project
+              .getTasks()
+              .withType(AbstractCompile.class)
+              .configureEach(task -> task.dependsOn(RESOLVE_BESU_DEPS_TASK_NAME));
+
+          for (String configName :
+              List.of("compileOnly", "testImplementation", "testCompileOnly")) {
+            project
+                .getConfigurations()
+                .getByName(configName)
+                .withDependencies(
+                    (DependencySet deps) -> {
+                      ensureResolved.run();
+                      for (Dependency dep : mergedDeps) {
+                        deps.add(dep);
+                      }
+                    });
+          }
+
+          project
+              .getConfigurations()
+              .getByName("annotationProcessor")
+              .withDependencies(
+                  (DependencySet deps) -> {
+                    ensureResolved.run();
+                    for (Dependency dep : mergedDeps) {
+                      if (ANNOTATION_PROCESSOR_DEPENDENCIES.contains(
+                          dep.getGroup() + ":" + dep.getName())) {
+                        deps.add(dep);
+                      }
+                    }
+                  });
         });
+  }
+
+  private String requireBesuVersion(final Provider<String> besuVersionProvider) {
+    if (!besuVersionProvider.isPresent()) {
+      throw new IllegalStateException(
+          "besuVersion must be set either in besuPlugin extension or as a project property");
+    }
+    return besuVersionProvider.get();
+  }
+
+  private void addEnforcedPlatforms(final Project project, final Provider<String> besuVersionProvider) {
+    for (String configName :
+        List.of(
+            "annotationProcessor",
+            "implementation",
+            "testImplementation",
+            "compileOnly",
+            "testCompileOnly",
+            "runtimeOnly")) {
+      project
+          .getConfigurations()
+          .getByName(configName)
+          .withDependencies(
+              deps ->
+                  deps.add(
+                      project
+                          .getDependencies()
+                          .enforcedPlatform(
+                              BESU_BOM_DEPENDENCY_COORDINATES
+                                  + ":"
+                                  + requireBesuVersion(besuVersionProvider))));
+    }
+  }
+
+  private List<Dependency> resolveBomDependencies(final Project project, final String besuVersion) {
+    Configuration bomConfiguration =
+        project
+            .getConfigurations()
+            .detachedConfiguration(
+                project
+                    .getDependencies()
+                    .create(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion + "@pom"));
+    bomConfiguration.setCanBeResolved(true);
+    File besuBom = bomConfiguration.getSingleFile();
+    try {
+      return parseBesuBOM(project, besuBom);
+    } catch (ParserConfigurationException | IOException | SAXException e) {
+      throw new RuntimeException(e);
+    }
+  }
+
+  private List<BesuProvidedDependency> resolveCatalogDependencies(
+      final Project project, final String besuVersion) {
+    Configuration besuDependencyCatalogConfiguration =
+        project
+            .getConfigurations()
+            .detachedConfiguration(
+                project
+                    .getDependencies()
+                    .create(BESU_MAIN_DEPENDENCY_COORDINATES + ":" + besuVersion + "@jar"));
+    besuDependencyCatalogConfiguration.setCanBeResolved(true);
+    File besuMainJar = besuDependencyCatalogConfiguration.getSingleFile();
+    String besuDependencyCatalog;
+    try (FileSystem zipFs = FileSystems.newFileSystem(besuMainJar.toPath())) {
+      besuDependencyCatalog = Files.readString(zipFs.getPath(BESU_ARTIFACTS_CATALOG_RESOURCE_NAME));
+    } catch (IOException e) {
+      throw new RuntimeException(e);
+    }
+
+    try {
+      return parseBesuDependencyCatalog(project, besuDependencyCatalog);
+    } catch (ParserConfigurationException | IOException | SAXException e) {
+      throw new RuntimeException(e);
+    }
   }
 
   private void configureRepositories(final Project project, final String besuRepo) {
@@ -277,62 +365,6 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
     return bomDependencies;
   }
 
-  private void addBesuDependencies(
-      final Project project, final String besuVersion, final List<Dependency> mergedDependencies) {
-    project
-        .getDependencies()
-        .add(
-            "annotationProcessor",
-            project
-                .getDependencies()
-                .enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
-    project
-        .getDependencies()
-        .add(
-            "implementation",
-            project
-                .getDependencies()
-                .enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
-    project
-        .getDependencies()
-        .add(
-            "testImplementation",
-            project
-                .getDependencies()
-                .enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
-    project
-        .getDependencies()
-        .add(
-            "compileOnly",
-            project
-                .getDependencies()
-                .enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
-    project
-        .getDependencies()
-        .add(
-            "testCompileOnly",
-            project
-                .getDependencies()
-                .enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
-    project
-        .getDependencies()
-        .add(
-            "runtimeOnly",
-            project
-                .getDependencies()
-                .enforcedPlatform(BESU_BOM_DEPENDENCY_COORDINATES + ":" + besuVersion));
-
-    for (Dependency dependency : mergedDependencies) {
-      project.getDependencies().add("compileOnly", dependency);
-      project.getDependencies().add("testImplementation", dependency);
-
-      if (ANNOTATION_PROCESSOR_DEPENDENCIES.contains(
-          dependency.getGroup() + ":" + dependency.getName())) {
-        project.getDependencies().add("annotationProcessor", dependency);
-      }
-    }
-  }
-
   private void excludeOldCoordinatesBesuDependencies(final Project project) {
     project
         .getConfigurations()
@@ -348,7 +380,6 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                               var groupId = requested.getGroup();
                               var moduleId = requested.getModule();
 
-                              // Exclude Besu old coordinates
                               if (isOldCoordinate(groupId, moduleId)) {
                                 selection.reject(
                                     "Excluded Besu old coordinate: " + groupId + ":" + moduleId);
@@ -359,7 +390,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
   }
 
   private void rewriteOldCoordinatesBesuDependencies(
-      final Project project, final String besuVersion) {
+      final Project project, final Provider<String> besuVersionProvider) {
     project
         .getConfigurations()
         .all(
@@ -379,7 +410,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
 
                                 if (newCoord != null) {
                                   substitution.useTarget(
-                                      newCoord + ":" + besuVersion,
+                                      newCoord + ":" + requireBesuVersion(besuVersionProvider),
                                       "Migrated to new Besu coordinates");
                                 }
                               }
