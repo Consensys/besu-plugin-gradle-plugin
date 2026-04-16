@@ -22,6 +22,7 @@ import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -35,6 +36,7 @@ import org.gradle.api.Project;
 import org.gradle.api.artifacts.Configuration;
 import org.gradle.api.artifacts.Dependency;
 import org.gradle.api.artifacts.DependencySet;
+import org.gradle.api.artifacts.ExternalModuleDependency;
 import org.gradle.api.artifacts.component.ModuleComponentIdentifier;
 import org.gradle.api.artifacts.component.ModuleComponentSelector;
 import org.gradle.api.plugins.JavaLibraryPlugin;
@@ -73,9 +75,9 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
     project.getTasks().register(RESOLVE_BESU_DEPS_TASK_NAME);
 
     // Configure after project evaluation to allow extension configuration.
-    // Only repositories, enforcedPlatform, and resolution strategies are set here —
-    // none of these trigger dependency resolution. The expensive BOM/catalog parsing
-    // is deferred to withDependencies callbacks (execution phase).
+    // Only repositories and resolution strategies are set here — none of these
+    // trigger dependency resolution. The expensive BOM/catalog parsing is deferred
+    // to withDependencies callbacks (execution phase).
     project.afterEvaluate(
         p -> {
           String besuRepo = extension.getBesuRepo().get();
@@ -84,7 +86,6 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
           }
 
           configureRepositories(project, besuRepo);
-          addEnforcedPlatforms(project, besuVersionProvider);
           excludeOldCoordinatesBesuDependencies(project);
           rewriteOldCoordinatesBesuDependencies(project, besuVersionProvider);
 
@@ -92,6 +93,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
           // actually resolves (execution phase), not during afterEvaluate.
           AtomicBoolean resolved = new AtomicBoolean(false);
           List<Dependency> mergedDeps = new ArrayList<>();
+          Map<String, String> managedVersionsByCoordinates = new HashMap<>();
           Runnable ensureResolved =
               () -> {
                 if (resolved.compareAndSet(false, true)) {
@@ -100,6 +102,21 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                   List<BesuProvidedDependency> catalogDeps =
                       resolveCatalogDependencies(project, besuVersion);
                   mergedDeps.addAll(mergeDependencies(bomDeps, catalogDeps));
+                  for (Dependency dep : mergedDeps) {
+                    String managedVersion = dep.getVersion();
+                    if (dep instanceof ExternalModuleDependency extDep) {
+                      String requiredVersion = extDep.getVersionConstraint().getRequiredVersion();
+                      if (requiredVersion != null && !requiredVersion.isBlank()) {
+                        managedVersion = requiredVersion;
+                      }
+                    }
+                    if (dep.getGroup() != null
+                        && dep.getName() != null
+                        && managedVersion != null
+                        && !managedVersion.isBlank()) {
+                      managedVersionsByCoordinates.put(dep.getGroup() + ":" + dep.getName(), managedVersion);
+                    }
+                  }
                   project
                       .getExtensions()
                       .getExtraProperties()
@@ -126,7 +143,14 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
               .configureEach(task -> task.dependsOn(RESOLVE_BESU_DEPS_TASK_NAME));
 
           for (String configName :
-              List.of("compileOnly", "testImplementation", "testCompileOnly")) {
+              List.of(
+                  "api",
+                  "implementation",
+                  "runtimeOnly",
+                  "compileOnly",
+                  "testImplementation",
+                  "testCompileOnly",
+                  "testRuntimeOnly")) {
             project
                 .getConfigurations()
                 .getByName(configName)
@@ -138,6 +162,26 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                       }
                     });
           }
+
+          project
+              .getConfigurations()
+              .configureEach(
+                  cfg ->
+                      cfg.getResolutionStrategy()
+                          .eachDependency(
+                              details -> {
+                                if (details.getRequested().getVersion() != null
+                                    && !details.getRequested().getVersion().isBlank()) {
+                                  return;
+                                }
+                                ensureResolved.run();
+                                String key =
+                                    details.getRequested().getGroup() + ":" + details.getRequested().getName();
+                                String managedVersion = managedVersionsByCoordinates.get(key);
+                                if (managedVersion != null && !managedVersion.isBlank()) {
+                                  details.useVersion(managedVersion);
+                                }
+                              }));
 
           project
               .getConfigurations()
@@ -161,30 +205,6 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
           "besuVersion must be set either in besuPlugin extension or as a project property");
     }
     return besuVersionProvider.get();
-  }
-
-  private void addEnforcedPlatforms(final Project project, final Provider<String> besuVersionProvider) {
-    for (String configName :
-        List.of(
-            "annotationProcessor",
-            "implementation",
-            "testImplementation",
-            "compileOnly",
-            "testCompileOnly",
-            "runtimeOnly")) {
-      project
-          .getConfigurations()
-          .getByName(configName)
-          .withDependencies(
-              deps ->
-                  deps.add(
-                      project
-                          .getDependencies()
-                          .enforcedPlatform(
-                              BESU_BOM_DEPENDENCY_COORDINATES
-                                  + ":"
-                                  + requireBesuVersion(besuVersionProvider))));
-    }
   }
 
   private List<Dependency> resolveBomDependencies(final Project project, final String besuVersion) {
@@ -303,6 +323,9 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
     ArrayList json = (ArrayList) new JsonSlurper().parseText(besuDependencyCatalog);
     for (Object o : json) {
       Map<String, String> dependency = (Map<String, String>) o;
+      if (shouldIgnoreBesuManagedDependency(dependency.get("group"), dependency.get("name"))) {
+        continue;
+      }
       besuProvidedDependencies.add(
           new BesuProvidedDependency(
               project
@@ -313,7 +336,6 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                           + dependency.get("name")
                           + ":"
                           + dependency.get("version")
-                          + "!!"
                           + (dependency.containsKey("classifier")
                               ? ":" + dependency.get("classifier")
                               : "")),
@@ -346,6 +368,9 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
         var artifactId = depElement.getElementsByTagName("artifactId").item(0).getTextContent();
         var version = depElement.getElementsByTagName("version").item(0).getTextContent();
         var classifierElement = depElement.getElementsByTagName("classifier");
+        if (shouldIgnoreBesuManagedDependency(groupId, artifactId)) {
+          continue;
+        }
 
         bomDependencies.add(
             project
@@ -356,7 +381,6 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                         + artifactId
                         + ":"
                         + version
-                        + "!!"
                         + (classifierElement.getLength() > 0
                             ? ":" + classifierElement.item(0).getTextContent()
                             : "")));
@@ -421,6 +445,10 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
 
   private boolean isOldCoordinate(String group, String module) {
     return BesuOld2NewCoordinatesMapping.getOld2NewCoordinates().containsKey(group + ":" + module);
+  }
+
+  private boolean shouldIgnoreBesuManagedDependency(String group, String name) {
+    return "org.jetbrains.kotlin".equals(group);
   }
 
   private Element getElement(Node node, String name) {

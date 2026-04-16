@@ -25,6 +25,7 @@ import org.gradle.api.artifacts.ResolvedDependency;
 import org.gradle.api.distribution.DistributionContainer;
 import org.gradle.api.distribution.plugins.DistributionPlugin;
 import org.gradle.api.file.CopySpec;
+import org.gradle.api.file.DuplicatesStrategy;
 import org.gradle.api.plugins.internal.JavaPluginHelper;
 import org.gradle.api.plugins.jvm.internal.JvmFeatureInternal;
 import org.gradle.jvm.tasks.Jar;
@@ -36,20 +37,23 @@ public abstract class BesuPluginDistribution implements Plugin<Project> {
     project.getPluginManager().apply(BesuPluginLibrary.class);
     project.getPluginManager().apply(DistributionPlugin.class);
 
-    // Register the task
+    // Register the task and ensure it runs after Besu dependency resolution.
     project
         .getTasks()
         .register(
             CollectPluginOnlyRuntimeArtifactsTask.TASK_NAME,
             CollectPluginOnlyRuntimeArtifactsTask.class,
-            task ->
-                task.getRuntimeArtifacts()
-                    .from(project.getConfigurations().getByName("runtimeClasspath")));
+            task -> {
+              task.getRuntimeArtifacts()
+                  .from(project.getConfigurations().getByName("runtimeClasspath"));
+              task.dependsOn(BesuPluginLibrary.RESOLVE_BESU_DEPS_TASK_NAME);
+            });
     project
         .getTasks()
         .withType(Jar.class)
         .configureEach(
             jar -> {
+              jar.setDuplicatesStrategy(DuplicatesStrategy.EXCLUDE);
               jar.dependsOn(CollectPluginOnlyRuntimeArtifactsTask.TASK_NAME);
               jar.from(
                   project
