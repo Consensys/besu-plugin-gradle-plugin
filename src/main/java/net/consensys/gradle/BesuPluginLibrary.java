@@ -87,6 +87,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
           }
 
           configureRepositories(project, besuRepo);
+          addPlatformConstraints(project, besuVersionProvider);
           excludeOldCoordinatesBesuDependencies(project);
           rewriteOldCoordinatesBesuDependencies(project, besuVersionProvider);
 
@@ -156,15 +157,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
               .withType(AbstractCompile.class)
               .configureEach(task -> task.dependsOn(RESOLVE_BESU_DEPS_TASK_NAME));
 
-          for (String configName :
-              List.of(
-                  "api",
-                  "implementation",
-                  "runtimeOnly",
-                  "compileOnly",
-                  "testImplementation",
-                  "testCompileOnly",
-                  "testRuntimeOnly")) {
+          for (String configName : List.of("compileOnly", "testImplementation", "testCompileOnly")) {
             project
                 .getConfigurations()
                 .getByName(configName)
@@ -219,6 +212,33 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
           "besuVersion must be set either in besuPlugin extension or as a project property");
     }
     return besuVersionProvider.get();
+  }
+
+  private void addPlatformConstraints(
+      final Project project, final Provider<String> besuVersionProvider) {
+    for (String configName :
+        List.of(
+            "annotationProcessor",
+            "api",
+            "implementation",
+            "testImplementation",
+            "compileOnly",
+            "testCompileOnly",
+            "runtimeOnly",
+            "testRuntimeOnly")) {
+      project
+          .getConfigurations()
+          .getByName(configName)
+          .withDependencies(
+              deps ->
+                  deps.add(
+                      project
+                          .getDependencies()
+                          .platform(
+                              BESU_BOM_DEPENDENCY_COORDINATES
+                                  + ":"
+                                  + requireBesuVersion(besuVersionProvider))));
+    }
   }
 
   private List<Dependency> resolveBomDependencies(final Project project, final String besuVersion) {
