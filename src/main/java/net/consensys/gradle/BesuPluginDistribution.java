@@ -25,7 +25,6 @@ import org.gradle.api.artifacts.ResolvedDependency;
 import org.gradle.api.distribution.DistributionContainer;
 import org.gradle.api.distribution.plugins.DistributionPlugin;
 import org.gradle.api.file.CopySpec;
-import org.gradle.api.file.DuplicatesStrategy;
 import org.gradle.api.plugins.internal.JavaPluginHelper;
 import org.gradle.api.plugins.jvm.internal.JvmFeatureInternal;
 import org.gradle.jvm.tasks.Jar;
@@ -53,7 +52,6 @@ public abstract class BesuPluginDistribution implements Plugin<Project> {
         .withType(Jar.class)
         .configureEach(
             jar -> {
-              jar.setDuplicatesStrategy(DuplicatesStrategy.EXCLUDE);
               jar.dependsOn(CollectPluginOnlyRuntimeArtifactsTask.TASK_NAME);
               jar.from(
                   project
