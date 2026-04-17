@@ -269,7 +269,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                   deps.add(
                       project
                           .getDependencies()
-                          .platform(
+                          .enforcedPlatform(
                               BESU_BOM_DEPENDENCY_COORDINATES
                                   + ":"
                                   + requireBesuVersion(besuVersionProvider))));
@@ -405,6 +405,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                           + dependency.get("name")
                           + ":"
                           + dependency.get("version")
+                          + "!!"
                           + (dependency.containsKey("classifier")
                               ? ":" + dependency.get("classifier")
                               : "")),
@@ -450,6 +451,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                         + artifactId
                         + ":"
                         + version
+                        + "!!"
                         + (classifierElement.getLength() > 0
                             ? ":" + classifierElement.item(0).getTextContent()
                             : "")));
