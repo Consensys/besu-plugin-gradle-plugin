@@ -36,15 +36,17 @@ public abstract class BesuPluginDistribution implements Plugin<Project> {
     project.getPluginManager().apply(BesuPluginLibrary.class);
     project.getPluginManager().apply(DistributionPlugin.class);
 
-    // Register the task
+    // Register the task and ensure it runs after Besu dependency resolution.
     project
         .getTasks()
         .register(
             CollectPluginOnlyRuntimeArtifactsTask.TASK_NAME,
             CollectPluginOnlyRuntimeArtifactsTask.class,
-            task ->
-                task.getRuntimeArtifacts()
-                    .from(project.getConfigurations().getByName("runtimeClasspath")));
+            task -> {
+              task.getRuntimeArtifacts()
+                  .from(project.getConfigurations().getByName("runtimeClasspath"));
+              task.dependsOn(BesuPluginLibrary.RESOLVE_BESU_DEPS_TASK_NAME);
+            });
     project
         .getTasks()
         .withType(Jar.class)
