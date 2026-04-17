@@ -12,6 +12,12 @@
  *
  * SPDX-License-Identifier: Apache-2.0
  */
+pluginManagement {
+  repositories {
+    gradlePluginPortal()
+    mavenLocal()
+  }
+}
 rootProject.name = 'besu-plugin-gradle-plugin'
 include 'examples:hello-ethereum'
 include 'examples:multi-module'
