@@ -18,6 +18,7 @@ import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
 import java.net.URI;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.FileSystem;
 import java.nio.file.FileSystems;
 import java.nio.file.Files;
@@ -52,6 +53,8 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
   static final String BESU_PROVIDED_DEPENDENCIES =
       BesuPluginLibrary.class.getName() + ".besuBomDependencies";
   static final String RESOLVE_BESU_DEPS_TASK_NAME = "resolveBesuProvidedDependencies";
+  static final String RESOLVE_BESU_DEPS_MARKER_RELATIVE_PATH =
+      "reports/dependencies/besu-resolved-deps.marker";
   static final String BESU_BOM_DEPENDENCY_COORDINATES = "org.hyperledger.besu:bom";
   static final String BESU_MAIN_DEPENDENCY_COORDINATES = "org.hyperledger.besu.internal:besu-app";
   static final String BESU_ARTIFACTS_CATALOG_RESOURCE_NAME =
@@ -149,7 +152,34 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                     task.setDescription(
                         "Resolves Besu BOM and catalog dependencies for Besu plugin builds.");
                     task.getInputs().property("besuVersion", besuVersionProvider);
-                    task.doLast(t -> ensureResolved.run());
+                    task
+                        .getOutputs()
+                        .file(
+                            project
+                                .getLayout()
+                                .getBuildDirectory()
+                                .file(RESOLVE_BESU_DEPS_MARKER_RELATIVE_PATH));
+                    task.doLast(
+                        t -> {
+                          ensureResolved.run();
+                          var markerFile =
+                              project
+                                  .getLayout()
+                                  .getBuildDirectory()
+                                  .file(RESOLVE_BESU_DEPS_MARKER_RELATIVE_PATH)
+                                  .get()
+                                  .getAsFile();
+                          markerFile.getParentFile().mkdirs();
+                          try {
+                            Files.writeString(
+                                markerFile.toPath(),
+                                "besuVersion=" + requireBesuVersion(besuVersionProvider) + System.lineSeparator(),
+                                StandardCharsets.UTF_8);
+                          } catch (IOException e) {
+                            throw new RuntimeException(
+                                "Unable to write Besu dependency resolution marker file " + markerFile, e);
+                          }
+                        });
                   });
 
           project
@@ -357,6 +387,9 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
     ArrayList json = (ArrayList) new JsonSlurper().parseText(besuDependencyCatalog);
     for (Object o : json) {
       Map<String, String> dependency = (Map<String, String>) o;
+      if (shouldIgnoreBesuManagedDependency(dependency.get("group"))) {
+        continue;
+      }
       besuProvidedDependencies.add(
           new BesuProvidedDependency(
               project
@@ -399,6 +432,9 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
         var artifactId = depElement.getElementsByTagName("artifactId").item(0).getTextContent();
         var version = depElement.getElementsByTagName("version").item(0).getTextContent();
         var classifierElement = depElement.getElementsByTagName("classifier");
+        if (shouldIgnoreBesuManagedDependency(groupId)) {
+          continue;
+        }
 
         bomDependencies.add(
             project
@@ -473,6 +509,10 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
 
   private boolean isOldCoordinate(String group, String module) {
     return BesuOld2NewCoordinatesMapping.getOld2NewCoordinates().containsKey(group + ":" + module);
+  }
+
+  private boolean shouldIgnoreBesuManagedDependency(String group) {
+    return "org.jetbrains.kotlin".equals(group);
   }
 
   private Element getElement(Node node, String name) {
