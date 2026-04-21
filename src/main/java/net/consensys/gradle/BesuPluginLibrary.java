@@ -475,6 +475,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                               var groupId = requested.getGroup();
                               var moduleId = requested.getModule();
 
+                              // Exclude Besu old coordinates
                               if (isOldCoordinate(groupId, moduleId)) {
                                 selection.reject(
                                     "Excluded Besu old coordinate: " + groupId + ":" + moduleId);
