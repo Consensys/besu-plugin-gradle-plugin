@@ -129,7 +129,8 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                         && dep.getName() != null
                         && managedVersion != null
                         && !managedVersion.isBlank()) {
-                      managedVersionsByCoordinates.put(dep.getGroup() + ":" + dep.getName(), managedVersion);
+                      managedVersionsByCoordinates.put(
+                          dep.getGroup() + ":" + dep.getName(), managedVersion);
                     }
                   }
                   project
@@ -152,8 +153,7 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                     task.setDescription(
                         "Resolves Besu BOM and catalog dependencies for Besu plugin builds.");
                     task.getInputs().property("besuVersion", besuVersionProvider);
-                    task
-                        .getOutputs()
+                    task.getOutputs()
                         .file(
                             project
                                 .getLayout()
@@ -173,11 +173,15 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                           try {
                             Files.writeString(
                                 markerFile.toPath(),
-                                "besuVersion=" + requireBesuVersion(besuVersionProvider) + System.lineSeparator(),
+                                "besuVersion="
+                                    + requireBesuVersion(besuVersionProvider)
+                                    + System.lineSeparator(),
                                 StandardCharsets.UTF_8);
                           } catch (IOException e) {
                             throw new RuntimeException(
-                                "Unable to write Besu dependency resolution marker file " + markerFile, e);
+                                "Unable to write Besu dependency resolution marker file "
+                                    + markerFile,
+                                e);
                           }
                         });
                   });
@@ -187,7 +191,8 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
               .withType(AbstractCompile.class)
               .configureEach(task -> task.dependsOn(RESOLVE_BESU_DEPS_TASK_NAME));
 
-          for (String configName : List.of("compileOnly", "testImplementation", "testCompileOnly")) {
+          for (String configName :
+              List.of("compileOnly", "testImplementation", "testCompileOnly")) {
             project
                 .getConfigurations()
                 .getByName(configName)
@@ -209,8 +214,11 @@ public abstract class BesuPluginLibrary implements Plugin<Project> {
                               details -> {
                                 ensureResolved.run();
                                 String key =
-                                    details.getRequested().getGroup() + ":" + details.getRequested().getName();
-                                String managedVersion = managedVersionsByCoordinatesRef.get().get(key);
+                                    details.getRequested().getGroup()
+                                        + ":"
+                                        + details.getRequested().getName();
+                                String managedVersion =
+                                    managedVersionsByCoordinatesRef.get().get(key);
                                 boolean isBesuCoordinate =
                                     "org.hyperledger.besu".equals(details.getRequested().getGroup())
                                         || "org.hyperledger.besu.internal"
